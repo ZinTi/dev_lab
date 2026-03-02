@@ -1,0 +1,26 @@
+# authd configuration
+
+[database]
+# url = "postgres://user:password@localhost:5432/authd"
+username = "user"
+password = "password"
+ipv4 = "127.0.0.1"
+port = 5432
+database = "authd"
+
+[server]
+ipv4 = "127.0.0.1"
+port = 50051
+
+[logging]
+level = "debug"
+file = "authd.log"
+cleanup_interval = 604800 # in seconds
+max_size = 10485760 # in bytes
+
+[token]
+access_timeout = 900 # in seconds (15 minutes)
+access_format = "jwt" # jwt or opaque
+refresh_timeout = 604800 # in seconds (7 days)
+refresh_format = "jwt"
+

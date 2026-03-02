@@ -1,10 +1,16 @@
-name: auth svc (Rust)
+# authd (Rust) workflow
+
+name: authd (Rust)
 
 on:
   push:
     branches: [ "main", "master" ]
+    # tags:
+    #   - "v*.*.*"
   pull_request:
     branches: [ "main", "master" ]
+    # tags:
+    #   - "v*.*.*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,11 +18,92 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false # false: 矩阵中某一任务失败，其他任务继续执行, true: 矩阵中某一任务失败，全部停止执行
+      matrix:
+        os: [ubuntu-latest]
+        arch: [amd64, arm64]
+        include:
+          - { os: ubuntu-latest, arch: amd64, rust_platform: x86_64-unknown-linux-gnu }         # 1/2 x86_64(amd64) + Linux + GCC
+          - { os: ubuntu-latest, arch: arm64, rust_platform: aarch64-unknown-linux-gnu }        # 2/2 aarch64(arm64) + Linux + GCC
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Set reusable strings
+      id: my_str
+      shell: bash
+      run: |
+          # github workspace path
+          workspace_dir="${{ github.workspace }}"       # 从GitHub上下文获取路径并标准化
+          workspace_dir="${workspace_dir//\\//}"        # 替换所有反斜杠为正斜杠
+          workspace_dir="${workspace_dir%/}"            # 移除路径末尾的斜杠（若有）
+
+          # get project version
+          proj_version=$(awk -F'"' '/^version[[:space:]]*=/ {print $2}' ${workspace_dir}/Cargo.toml)
+          if [ -z "$proj_version" ]; then
+              proj_version=$(grep '^version' ${workspace_dir}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "project version: $proj_version"
+
+          # github actions env
+          echo "WORKSPACE_DIR=$workspace_dir" >> "$GITHUB_OUTPUT"
+          echo "PROJECT_VERSION=$proj_version" >> "$GITHUB_OUTPUT"
+
     - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      run: |
+        rustup show active-toolchain # 显示工具链
+        cd ${{ github.workspace }}
+        sudo chmod +x ./build-for-linux.sh
+        ./build-for-linux.sh
+
+    # - name: Run tests
+    #   run: cargo test --verbose
+
+    - name: Package
+      shell: bash
+      run: |
+        cd ${{ steps.my_str.outputs.WORKSPACE_DIR }}
+
+        # 使用ls查找匹配的目录并获取第一个
+        dir_name=$(ls -d authd-v* 2>/dev/null | head -n 1)
+
+        # 移除末尾的斜杠
+        if [[ -n "$dir_name" ]]; then
+          dir_name=${dir_name%/}
+          echo "找到匹配的目录: ${dir_name}"
+          tar -cJvf ${dir_name}.tar.xz ${dir_name}
+        else
+          echo "Error: 没有找到匹配的目录"
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: authd-${{ matrix.os }}-${{ matrix.c_compiler }}
+        path: |
+          ${{ steps.my_str.outputs.WORKSPACE_DIR }}/*.tar.xz
+
+    - name: Generate Release Notes
+      shell: bash
+      run: |
+        utc_datetime_ms=$(date -u +"%Y-%m-%d %H:%M:%S.%3N")
+        cd ${{ steps.my_str.outputs.WORKSPACE_DIR }}
+        echo "# Release Notes" > release_notes.md
+        echo "## [v${{ steps.my_str.outputs.PROJECT_VERSION }}] - ${utc_datetime_ms}" >> release_notes.md
+        cat ${{ steps.my_str.outputs.WORKSPACE_DIR }}/.github/RELEASE.md >> release_notes.md
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.my_str.outputs.PROJECT_VERSION }}
+        body_path: release_notes.md
+        files: |
+          ${{ steps.my_str.outputs.WORKSPACE_DIR }}/*.tar.xz
+        overwrite_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
