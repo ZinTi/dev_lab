@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  auth-service:
+    image: my-app-auth:latest  # 使用你构建好的认证服务镜像
+    container_name: auth-service
+    ports:
+      - "8081:8080"            # 将容器的8080端口映射到主机的8081端口
+    environment:
+      - DB_URL=mongodb://db:27017/auth # 环境变量，连接名为‘db’的容器
+    networks:
+      - my-app-network         # 所有服务都加入同一个自定义网络
+
+  api-gateway:
+    image: my-app-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "80:8080"              # 网关对外暴露80端口
+    depends_on:
+      - auth-service           # 表明它依赖auth-service，会等auth启动后再启动
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8080 # 通过容器名‘auth-service’直接访问
+    networks:
+      - my-app-network
+
+  user-service:
+    image: my-app-user:latest
+    container_name: user-service
+    # 不映射端口到主机，因为外部请求通过网关进来，内部服务之间直接通信
+    environment:
+      - DB_URL=mongodb://db:27017/users
+    networks:
+      - my-app-network
+
+  # 你甚至可以用Docker Compose直接启动一个数据库容器
+  db:
+    image: mongo:5.0
+    container_name: mongodb
+    volumes:
+      - mongo_data:/data/db    # 挂载数据卷，保证数据持久化
+    networks:
+      - my-app-network
+
+# 定义网络和数据卷
+networks:
+  my-app-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
